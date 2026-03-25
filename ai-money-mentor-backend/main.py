@@ -4,12 +4,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from model import calculate_plan, calculate_score
 from openai import OpenAI
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
 
 app = FastAPI()
 
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,13 +16,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-client = OpenAI(
-    api_key=os.getenv("OPENROUTER_API_KEY"),
-    base_url="https://openrouter.ai/api/v1"
-)
+# OpenAI Client
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# Memory
 chat_memory = []
 
+# Models
 class UserInput(BaseModel):
     income: float
     expenses: float
@@ -39,13 +37,17 @@ class GoalInput(BaseModel):
     amount: float
     months: int
 
+
+# Routes
 @app.get("/")
 def home():
     return {"message": "API Running 🚀"}
 
+
 @app.post("/analyze")
 def analyze(data: UserInput):
     return calculate_plan(data.income, data.expenses)
+
 
 @app.post("/score")
 def score(data: UserInput):
@@ -53,27 +55,35 @@ def score(data: UserInput):
     status = "Excellent 🔥" if s >= 80 else "Good 👍" if s >= 60 else "Improve ⚠️"
     return {"score": s, "status": status}
 
+
+# 🎯 Goal Plan (NO markdown, clean format)
 @app.post("/goal-plan")
 def goal_plan(data: GoalInput):
     monthly = data.amount / data.months
 
     prompt = f"""
-Give a financial plan in simple clean text format.
+Create a financial plan in very clean simple text.
 
 Rules:
-- Do NOT use #, *, -, markdown symbols
-- Use simple headings with normal text
-- Use proper spacing
-- Keep it neat and readable
+- Do NOT use symbols like #, *, -, bullet points
+- Use plain sentences
+- Keep spacing between sections
+- Make it easy to read
+
+Include:
+Monthly saving amount
+Simple step by step plan
+Investment suggestions (India)
+Tips
 
 Goal: {data.goal}
 Amount: ₹{data.amount}
-Time: {data.months} months
+Duration: {data.months} months
 """
 
     try:
         res = client.chat.completions.create(
-            model="deepseek/deepseek-chat",
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}]
         )
 
@@ -81,32 +91,42 @@ Time: {data.months} months
             "monthly_saving": monthly,
             "plan": res.choices[0].message.content
         }
-    except:
+
+    except Exception as e:
         return {
             "monthly_saving": monthly,
-            "plan": "Save monthly and invest wisely."
+            "plan": "Save regularly every month and reduce unnecessary expenses."
         }
 
+
+# 🤖 Chatbot (NO markdown)
 @app.post("/chat")
 def chat(data: ChatInput):
     global chat_memory
 
     system_prompt = """
-    You are a financial advisor.
-    Reply in clean markdown:
-    - headings
-    - bullet points
-    - bold numbers
-    """
+You are a smart financial advisor.
 
-    chat_memory.append({"role": "user", "content": data.message})
+Rules:
+- Do NOT use markdown symbols like #, *, -
+- Write in clean simple sentences
+- Give practical financial advice for Indian users
+- Keep response short and clear
+"""
+
+    user_message = data.message
+
+    if data.income and data.expenses:
+        user_message += f" User income is {data.income} and expenses are {data.expenses}."
+
+    chat_memory.append({"role": "user", "content": user_message})
     chat_memory = chat_memory[-5:]
 
     messages = [{"role": "system", "content": system_prompt}] + chat_memory
 
     try:
         res = client.chat.completions.create(
-            model="deepseek/deepseek-chat",
+            model="gpt-4o-mini",
             messages=messages
         )
 
@@ -114,5 +134,6 @@ def chat(data: ChatInput):
         chat_memory.append({"role": "assistant", "content": reply})
 
         return {"reply": reply}
-    except:
-        return {"reply": "Try saving 20% income."}
+
+    except Exception as e:
+        return {"reply": "Try to save at least 20 percent of your income."}
